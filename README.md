@@ -1,2 +1,10 @@
-# A (recreational) programming exercise 
-## aimed at solving the gravitational lens equations to get a bit better at .c 
+# lensfocus
+
+### A grafic interface to quickly test how different lens models focus observed images in the source plane.
+
+At some point I would like to add:
+- proper visualisation of the critical curves (if fast enough)
+- more mass models
+- input/output .yaml files with the lens parameters and image positions
+- better contrast control for .fits files
+- improve user interface
