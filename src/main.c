@@ -15,7 +15,7 @@
 //------------------------------------------------------------------------------------
 // Debugging
 #define DEBUG 1
-#define CURRENT_LOG_MODE LOG_DEBUG
+#define CURRENT_LOG_MODE LOG_INFO
 #define READ_FITS_IMAGE 1
 char* img_fname = "data/fits/J0206_SCI.fits";
 
@@ -50,20 +50,19 @@ char* img_fname = "data/fits/J0206_SCI.fits";
 const double LENS_MASS = 8e11;      // Mass of the main deflector
 const int    N_EXTSRC  = 512;       // n point to discretize circular extended source
 
-const int    N_IGRIDP       = 200 ;    // N of points in img plane grid [NxN]
+const int    N_IGRIDP       = 80 ;    // N of points in img plane grid [NxN]
 const int    I_to_S_SPACING = 3;      // sampling every 2x2 pixel in img plane to
                                       // create the src plane
 const int    SRC_PLANE_SIZE = 50;     // N of points in src plane grid [NxN]
 
-const double IMG_WIDTH_AS  = 3.5;   // Width and ...
-const double IMG_HEIGHT_AS = 3.5;   // Heigth of the image plane in arcsec
+const double IMG_WIDTH_AS  = 4.0;   // Width and ...
+const double IMG_HEIGHT_AS = 4.0;   // Heigth of the image plane in arcsec
 double       R_EXTSRC  = 0.06;      // radius of the extended source, in arcsec
 double       angStep   = 2*PI/(double)N_EXTSRC;
 double   SCALE_SPLANE  = 0.01;      // Scale of 1 pixel in the source plane in arcsecs
 double   SCALE_IPLANE  = 0.02;      // Scale of 1 pixel in the source plane in arcsecs
 double       GammaExt1 = 0;         // First component of the external shear
 double       GammaExt2 = 0;         // Second component of the external shear
-
 
 //------------------------------------------------------------------------------------
 const int screenWidth = 1512;
@@ -166,7 +165,7 @@ QFitsInterface* ReadFitsFile(char* fname){
         exit(1);
     }
 
-    TraceLog(LOG_DEBUG, "file         : %s\n"
+    TraceLog(LOG_INFO, "file         : %s\n"
             "xtnum        : %d\n"
             "pnum         : %d\n"
             "# xtensions  : %d\n"
@@ -815,9 +814,6 @@ typedef struct
     double rc;             // core radius [arcsec]
     double f, PA;          // Axis ratio and Position angle [radians]
     double cos_PA, sin_PA; // precomputed for efficiency
-
-    float gamma_1; // TODO: merge this in a struct
-    float gamma_2; // Components of external shear at the lens
 } Lens;
 
 typedef struct {
@@ -1039,6 +1035,59 @@ void StateDestroy(State* state) {
 
         FreeStateGrids(state);
         free(state);
+    }
+}
+
+void DisplayStateInfo(State* state) {
+    // General info
+    int zerx, zery, curx, cury;
+    zerx = zeroExtraPanX + 15;
+    zery = zeroExtraPanY + 15;
+    curx = zerx; cury = zery;
+    DrawText("Info:", curx, cury, 20, DARKMODE ? RAYWHITE : BLACKBOARD);
+    // Lens info
+    curx += 30; cury += 30;
+    DrawText("Lens:", curx, cury, 20, DARKMODE ? RAYWHITE : BLACKBOARD);
+    if (state->lensMan->count > 0) {
+        Lens* lens = &state->lensMan->lenses[0];
+        char lensposInfo[128];
+        char lenspar1Info[128];
+        char lenspar2Info[128];
+
+        // TODO: Expand lens info based on model type
+        curx += 10; cury += 25;
+        snprintf(lensposInfo, sizeof(lensposInfo), "x = %.2f\", y = %.2f\"", lens->coord.RA, lens->coord.DEC);
+        DrawText(lensposInfo, curx, cury, 16, DARKMODE ? RAYWHITE : BLACKBOARD);
+        curx += 0; cury += 25;
+        snprintf(lenspar1Info, sizeof(lenspar1Info), "b = %.2f\", qh = %.2f", lens->b, lens->qh);
+        DrawText(lenspar1Info, curx, cury, 16, DARKMODE ? RAYWHITE : BLACKBOARD);
+        curx += 0; cury += 25;
+        snprintf(lenspar2Info, sizeof(lenspar2Info), "f = %.2f, PA = %.2f deg", lens->f, lens->PA * RAD2DEG);
+        DrawText(lenspar2Info, curx, cury, 16, DARKMODE ? RAYWHITE : BLACKBOARD);
+    } else {
+        DrawText("No lens defined", zeroExtraPanX + 25, zeroExtraPanY + 55, 16, DARKMODE ? RAYWHITE : BLACKBOARD);
+    }
+    curx = zerx;;
+    curx += 30; cury += 30;
+    // Ext shear info
+    DrawText("Ext Shear:", curx, cury, 20, DARKMODE ? RAYWHITE : BLACKBOARD);
+    char extshearInfo[128];
+    curx += 10; cury += 25;
+    snprintf(extshearInfo, sizeof(extshearInfo), "g1 = %.2f, g2 = %.2f", state->gamma1, state->gamma2);
+    DrawText(extshearInfo, curx, cury, 16, DARKMODE ? RAYWHITE : BLACKBOARD);
+
+    curx = zerx; cury = zery;
+    curx += 350; cury += 30;
+    // Observed images info
+    DrawText("Observed Images:", curx, cury, 20, DARKMODE ? RAYWHITE : BLACKBOARD);
+    curx += 10;
+    for (int i = 0; i < 8; i++) {
+        if (state->obsImgIsVisible[i]) {
+            char imgInfo[64];
+            cury += 25;
+            snprintf(imgInfo, sizeof(imgInfo), "Img %d: (%.2f\", %.2f\")", i + 1, state->obsImg[i].RA, state->obsImg[i].DEC);
+            DrawText(imgInfo, curx, cury, 16, DARKMODE ? RAYWHITE : BLACKBOARD);
+        }
     }
 }
 
@@ -2295,7 +2344,9 @@ void DrawSettingsForm(State *state, FormGUI *formGUI) {
                     visObsImgTmp = &(formGUI->obsImg1IsVisible);
                     break;
             }
-            DrawRectangleRec((Rectangle){formRect.x + 10, controlY, 20, 20}, colors[i % numColors]);
+
+            // DrawRectangleRec((Rectangle){formRect.x + 10, controlY, 20, 20}, colors[i % numColors]);
+            DrawCircleV((Vector2){formRect.x + 20, controlY + 10}, 10, colors[i % numColors]);
             tmpCheckUpdate = GuiCheckBox((Rectangle){formRect.x + 38, controlY, 20, 20} , "", visObsImgTmp);
             hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
             tmpCheckUpdate = GuiSlider(
@@ -2446,8 +2497,8 @@ void UpdateFormGUI(State* state, FormGUI* formGUI){
         formGUI->lensPAInput = state->lensMan->lenses[0].PA;
         formGUI->lensPositionSlider.RA = state->lensMan->lenses[0].coord.RA;
         formGUI->lensPositionSlider.DEC = state->lensMan->lenses[0].coord.DEC;
-        formGUI->gamma_1 = state->lensMan->lenses[0].gamma_1;
-        formGUI->gamma_2 = state->lensMan->lenses[0].gamma_2;
+        formGUI->gamma_1 = state->gamma1;
+        formGUI->gamma_2 = state->gamma2;
 
         formGUI->sourceModelType = state->sourceMan->sources[0].modelType;
         formGUI->sourcePositionSlider.RA = state->sourceMan->sources[0].coord.RA;
@@ -2500,8 +2551,8 @@ void InitFormGUI(State* state, FormGUI* formGUI) {
         formGUI->lensPAInput = state->lensMan->lenses[0].PA;
         formGUI->lensPositionSlider.RA = state->lensMan->lenses[0].coord.RA;
         formGUI->lensPositionSlider.DEC = state->lensMan->lenses[0].coord.DEC;
-        formGUI->gamma_1 = state->lensMan->lenses[0].gamma_1;
-        formGUI->gamma_2 = state->lensMan->lenses[0].gamma_2;
+        formGUI->gamma_1 = state->gamma1;
+        formGUI->gamma_2 = state->gamma2;
 
         formGUI->sourceModelType = state->sourceMan->sources[0].modelType;
         formGUI->sourcePositionSlider.RA = state->sourceMan->sources[0].coord.RA;
@@ -2580,8 +2631,8 @@ void InitFormGUI(State* state, FormGUI* formGUI) {
     formGUI->gridLimDistance = gridLimDistance;
     formGUI->tmpSrcScale = SCALE_SPLANE * 10;
     formGUI->tmpImgScale = SCALE_IPLANE * 10;
-    formGUI->viewFITS = false;
-    formGUI->viewScaleBar = false;
+    formGUI->viewFITS = true;
+    formGUI->viewScaleBar = true;
     formGUI->viewParity = DRAW_EXT_PARITY;
     formGUI->viewExtSrcPoints = DRAW_EXT_AS_POINTS;
 
@@ -2730,6 +2781,7 @@ int main(void)
             //                     state->lensMan->lenses[0].f),
             //                     15, 75, 20, DARKMODE ? RAYWHITE : BLACK);
         //----------------------------------------------------------------------------------
+        DisplayStateInfo(state);
         EndDrawing();
     }
 

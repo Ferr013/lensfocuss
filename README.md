@@ -2,6 +2,8 @@
 
 ### A grafic interface to quickly test how different lens models focus observed images in the source plane.
 
+![Screenshot of lensfocus](/img/screenshot.png)
+
 At some point I would like to add:
 - proper visualisation of the critical curves (if fast enough)
 - more mass models
