@@ -6,8 +6,15 @@
 #include <stdlib.h>
 #include "raylib.h"
 #include "raymath.h"
+
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
+#undef RAYGUI_IMPLEMENTATION // Avoid including raygui implementation again
+
+#define GUI_WINDOW_FILE_DIALOG_IMPLEMENTATION
+#include "gui_window_file_dialog.h"
+
+
 #include "style_amber.h"
 #include "qfits.h" //qfits version 6.20 by yjung
 #include "fastell.h"
@@ -17,8 +24,16 @@
 #define DEBUG 1
 #define CURRENT_LOG_MODE LOG_INFO
 #define READ_FITS_IMAGE 1
-char* img_fname = "data/fits/J0206_SCI.fits";
-
+char img_fname[512] = { 0 };
+const char default_img_fname[] = "data/fits/J0206_SCI.fits";
+// strcpy(img_fname, default_img_fname); // At beginning of main()
+//------------------------------------------------------------------------------------
+// Images colors
+bool DARKMODE = true;
+const Color colors[] = {ORANGE, BLUE, RED, PURPLE, GOLD, LIME, DARKPURPLE, BEIGE};
+const int numColors = sizeof(colors) / sizeof(colors[0]);
+bool DRAW_EXT_AS_POINTS = true;
+bool DRAW_EXT_PARITY    = false;
 //------------------------------------------------------------------------------------
 // Constants
 #define DISTANCE_LENS_TO_OBSERVER 1.0         // Distance to the observer (arbitrary units)
@@ -116,15 +131,6 @@ const char* Get_Mode_Text(enum MODE CURRENT_MODE) {
         return replies[CURRENT_MODE];
 }
 
-//------------------------------------------------------------------------------------
-// Images colors
-bool DARKMODE = true;
-const Color colors[] = {ORANGE, BLUE, RED, PURPLE, GOLD, LIME, DARKPURPLE, BEIGE};
-const int numColors = sizeof(colors) / sizeof(colors[0]);
-bool DRAW_EXT_AS_POINTS = true;
-bool DRAW_EXT_PARITY    = false;
-//------------------------------------------------------------------------------------
-
 // **QFITS wrapper**
 //------------------------------------------------------------------------------------
 typedef struct {
@@ -165,7 +171,8 @@ QFitsInterface* ReadFitsFile(char* fname){
         exit(1);
     }
 
-    TraceLog(LOG_INFO, "file         : %s\n"
+    TraceLog(LOG_INFO,
+            "file         : %s\n"
             "xtnum        : %d\n"
             "pnum         : %d\n"
             "# xtensions  : %d\n"
@@ -670,41 +677,7 @@ typedef struct  {
     Texture2D* textureImageData;
  } ImagePlane;
 
-void InitImagePlane(ImagePlane* imgPlane){
-
-#if !READ_FITS_IMAGE
-    imgPlane->Ni     = N_IGRIDP;                    //pixels in x direction
-    imgPlane->Nj     = N_IGRIDP;                    //pixels in y direction
-    imgPlane->Nm     = imgPlane->Ni * imgPlane->Nj; //total pixels in the image data
-    imgPlane->width  = IMG_WIDTH_AS;                //in arcsec
-    imgPlane->height = IMG_HEIGHT_AS;               //in arcsec
-
-    imgPlane->img     = (double*) calloc(imgPlane->Nm,sizeof(double));
-    imgPlane->x       = (double*) calloc(imgPlane->Nm,sizeof(double));
-    imgPlane->y       = (double*) calloc(imgPlane->Nm,sizeof(double));
-    imgPlane->defl_x  = (double*) calloc(imgPlane->Nm,sizeof(double));
-    imgPlane->defl_y  = (double*) calloc(imgPlane->Nm,sizeof(double));
-
-    int i0    = floor(imgPlane->Ni/2);
-    int j0    = floor(imgPlane->Nj/2);
-    double di = imgPlane->height/imgPlane->Ni;
-    double dj = imgPlane->width/imgPlane->Nj;
-
-    // xmax,xmin are the x coordinates of the leftmost and rightmost pixels.
-    // REMEMBER: xmax-xmin != width (Nj*dj).
-    // Similarly for y.
-    imgPlane->xmin = -j0*dj;
-    imgPlane->xmax = (imgPlane->Nj-1-j0)*dj;
-    imgPlane->ymin = -i0*di;
-    imgPlane->ymax = (imgPlane->Ni-1-i0)*di;
-
-    for(int i=0;i<imgPlane->Ni;i++){
-        for(int j=0;j<imgPlane->Nj;j++){
-            imgPlane->x[i*imgPlane->Nj+j] =  (j-j0)*dj;
-            imgPlane->y[i*imgPlane->Nj+j] = -(i-i0)*di;//reflect y-axis
-        }
-    }
-#else // TODO: Make the image filename configurable
+void LoadFitsFileInImagePlane(ImagePlane* imgPlane, char* img_fname){
     imgPlane->fitsImageData = ReadFitsFile(img_fname);
 
     if (!imgPlane->fitsImageData) {
@@ -735,7 +708,16 @@ void InitImagePlane(ImagePlane* imgPlane){
             }
         }
     }
+    imgPlane->textureImageData = (Texture2D*) malloc(sizeof(Texture2D));
+    TraceLog(LOG_DEBUG, "Updating texture from image data");
+    imgPlane->textureImageData->width  = imgPlane->Ni;
+    imgPlane->textureImageData->height = imgPlane->Nj;
+    UpdateTextureLensfocus(imgPlane->textureImageData, imgPlane->img, imgPlane->Ni, imgPlane->Nj);
+    TraceLog(LOG_DEBUG, "Finished updating texture from image data");
+}
 
+void InitImagePlane(ImagePlane* imgPlane, char* img_fname){
+    LoadFitsFileInImagePlane(imgPlane, img_fname);
     imgPlane->x       = (double*) calloc(imgPlane->Nm,sizeof(double));
     imgPlane->y       = (double*) calloc(imgPlane->Nm,sizeof(double));
     imgPlane->defl_x  = (double*) calloc(imgPlane->Nm,sizeof(double));
@@ -760,14 +742,18 @@ void InitImagePlane(ImagePlane* imgPlane){
             imgPlane->y[i*imgPlane->Nj+j] = -(i-i0)*di;//reflect y-axis
         }
     }
+}
 
-    imgPlane->textureImageData = (Texture2D*) malloc(sizeof(Texture2D));
-    TraceLog(LOG_DEBUG, "Updating texture from image data");
-    imgPlane->textureImageData->width  = imgPlane->Ni;
-    imgPlane->textureImageData->height = imgPlane->Nj;
-    UpdateTextureLensfocus(imgPlane->textureImageData, imgPlane->img, imgPlane->Ni, imgPlane->Nj);
-    TraceLog(LOG_DEBUG, "Finished updating texture from image data");
-#endif
+void UpdateImagePlane(ImagePlane* imgPlane, char* img_fname){
+    free(imgPlane->img);
+    free(imgPlane->x);
+    free(imgPlane->y);
+    free(imgPlane->defl_x);
+    free(imgPlane->defl_y);
+    ClearFitsData(imgPlane->fitsImageData);
+    UnloadTexture(*imgPlane->textureImageData);
+    free(imgPlane->textureImageData);
+    InitImagePlane(imgPlane, img_fname);
 }
 
 // **Source and Image positions**
@@ -998,7 +984,7 @@ State* StateInit () {
     InitDynArraySkyCoord(state->srcSGrid, state->grid_size);
 
     state->imgPlane = (ImagePlane*)malloc(sizeof(ImagePlane));
-    InitImagePlane(state->imgPlane);
+    InitImagePlane(state->imgPlane, img_fname);
     state->gamma1 = 0;
     state->gamma2 = 0;
 
@@ -2681,6 +2667,18 @@ void MenuImGUI(State* state, FormGUI* formGUI) {
     }
 }
 
+void ImGuiLoadFITS(GuiWindowFileDialogState* fileDialogState){
+    if (fileDialogState->windowActive) GuiLock();
+
+    if (GuiButton((Rectangle){ ctrExtraPanX+400, ctrExtraPanY-100, 140, 30 }, GuiIconText(ICON_FILE_OPEN, "Open .fits"))){
+        fileDialogState->windowActive = true;
+    }
+    GuiUnlock();
+
+    // GUI: Dialog Window
+    GuiWindowFileDialog(fileDialogState);
+}
+
 //------------------------------------------------------------------------------------
 // Program main entry point
 //------------------------------------------------------------------------------------
@@ -2692,6 +2690,12 @@ int main(void)
     SetTraceLogLevel(CURRENT_LOG_MODE);
 
     DARKMODE ? GuiLoadStyleAmber() : GuiLoadStyleDefault();
+
+    //------------------------------------------------------------------------------------
+    // Custom file dialog
+    GuiWindowFileDialogState fileDialogState = InitGuiWindowFileDialog(GetWorkingDirectory());
+    bool exitWindow = false;
+    strcpy(img_fname, default_img_fname);
 
     // Init state
     CURRENT_MODE = LENS_TO_SRC_MODE;
@@ -2714,6 +2718,17 @@ int main(void)
     {
         // Update
         //----------------------------------------------------------------------------------
+        if (fileDialogState.SelectFilePressed)
+        {
+            // Load image file (if supported extension)
+            if (IsFileExtension(fileDialogState.fileNameText, ".fits"))
+            {
+                strcpy(img_fname, TextFormat("%s" PATH_SEPERATOR "%s", fileDialogState.dirPathText, fileDialogState.fileNameText));
+                UpdateImagePlane(state->imgPlane, img_fname);
+            }
+
+            fileDialogState.SelectFilePressed = false;
+        }
 
         // Draw
         //----------------------------------------------------------------------------------
@@ -2773,15 +2788,10 @@ int main(void)
                 CloseWindow();
                 return -1; // TODO: Implement this mode;
         }
-            // TODO: Add a button to display the paramters below
-            // DrawText(TextFormat("M SIE: %.2f x1e12 M_sun",
-            //                     state->lensMan->lenses[0].M/1e12),
-            //                     15, 50, 20, DARKMODE ? RAYWHITE : BLACK);
-            // DrawText(TextFormat("f SIE: %.2f",
-            //                     state->lensMan->lenses[0].f),
-            //                     15, 75, 20, DARKMODE ? RAYWHITE : BLACK);
+
         //----------------------------------------------------------------------------------
         DisplayStateInfo(state);
+        ImGuiLoadFITS(&fileDialogState);
         EndDrawing();
     }
 
