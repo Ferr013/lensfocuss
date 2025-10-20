@@ -31,6 +31,9 @@
         "utility": "c",
         "triangle.h": "c",
         "raylib.h": "c",
-        "raygui.h": "c"
+        "raygui.h": "c",
+        "__memory": "c",
+        "limits": "c",
+        "ratio": "c"
     }
 }

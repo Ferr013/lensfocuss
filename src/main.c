@@ -70,8 +70,9 @@ const int    I_to_S_SPACING = 3;      // sampling every 2x2 pixel in img plane t
                                       // create the src plane
 const int    SRC_PLANE_SIZE = 50;     // N of points in src plane grid [NxN]
 
-const double IMG_WIDTH_AS  = 4.0;   // Width and ...
-const double IMG_HEIGHT_AS = 4.0;   // Heigth of the image plane in arcsec
+double IMG_WIDTH_AS  = 8.0;   // Width and ...
+double IMG_HEIGHT_AS = 8.0;   // Heigth of the image plane in arcsec
+
 double       R_EXTSRC  = 0.06;      // radius of the extended source, in arcsec
 double       angStep   = 2*PI/(double)N_EXTSRC;
 double   SCALE_SPLANE  = 0.01;      // Scale of 1 pixel in the source plane in arcsecs
@@ -677,7 +678,7 @@ typedef struct  {
     Texture2D* textureImageData;
  } ImagePlane;
 
-void LoadFitsFileInImagePlane(ImagePlane* imgPlane, char* img_fname){
+void LoadFitsFileInImagePlane(ImagePlane* imgPlane, char* img_fname, double img_width_as, double img_height_as){
     imgPlane->fitsImageData = ReadFitsFile(img_fname);
 
     if (!imgPlane->fitsImageData) {
@@ -685,16 +686,16 @@ void LoadFitsFileInImagePlane(ImagePlane* imgPlane, char* img_fname){
         imgPlane->Ni     = N_IGRIDP;                    //pixels in x direction
         imgPlane->Nj     = N_IGRIDP;                    //pixels in y direction
         imgPlane->Nm     = imgPlane->Ni * imgPlane->Nj; //total pixels in the image data
-        imgPlane->width  = IMG_WIDTH_AS;                //in arcsec
-        imgPlane->height = IMG_HEIGHT_AS;               //in arcsec
+        imgPlane->width  = img_width_as;                //in arcsec
+        imgPlane->height = img_height_as;               //in arcsec
         imgPlane->img     = (double*) calloc(imgPlane->Nm,sizeof(double));
     } else {
         imgPlane->Ni     = imgPlane->fitsImageData->lx; //pixels in x direction
         imgPlane->Nj     = imgPlane->fitsImageData->ly; //pixels in y direction
         imgPlane->Nm     = imgPlane->Ni * imgPlane->Nj; //total pixels in the image data
         // TODO: read the size in arcsecs from the fits file!
-        imgPlane->width  = IMG_WIDTH_AS;                //in arcsec
-        imgPlane->height = IMG_HEIGHT_AS;               //in arcsec
+        imgPlane->width  = img_width_as;                //in arcsec
+        imgPlane->height = img_height_as;               //in arcsec
         imgPlane->img     = (double*) calloc(imgPlane->Nm,sizeof(double));
 
         for(int i=0;i<imgPlane->Ni;i++){
@@ -716,8 +717,8 @@ void LoadFitsFileInImagePlane(ImagePlane* imgPlane, char* img_fname){
     TraceLog(LOG_DEBUG, "Finished updating texture from image data");
 }
 
-void InitImagePlane(ImagePlane* imgPlane, char* img_fname){
-    LoadFitsFileInImagePlane(imgPlane, img_fname);
+void InitImagePlane(ImagePlane* imgPlane, char* img_fname, double img_width_as, double img_height_as){
+    LoadFitsFileInImagePlane(imgPlane, img_fname, img_width_as, img_height_as);
     imgPlane->x       = (double*) calloc(imgPlane->Nm,sizeof(double));
     imgPlane->y       = (double*) calloc(imgPlane->Nm,sizeof(double));
     imgPlane->defl_x  = (double*) calloc(imgPlane->Nm,sizeof(double));
@@ -744,7 +745,7 @@ void InitImagePlane(ImagePlane* imgPlane, char* img_fname){
     }
 }
 
-void UpdateImagePlane(ImagePlane* imgPlane, char* img_fname){
+void UpdateImagePlane(ImagePlane* imgPlane, char* img_fname, double img_width_as, double img_height_as){
     free(imgPlane->img);
     free(imgPlane->x);
     free(imgPlane->y);
@@ -753,7 +754,7 @@ void UpdateImagePlane(ImagePlane* imgPlane, char* img_fname){
     ClearFitsData(imgPlane->fitsImageData);
     UnloadTexture(*imgPlane->textureImageData);
     free(imgPlane->textureImageData);
-    InitImagePlane(imgPlane, img_fname);
+    InitImagePlane(imgPlane, img_fname, img_width_as, img_height_as);
 }
 
 // **Source and Image positions**
@@ -984,7 +985,7 @@ State* StateInit () {
     InitDynArraySkyCoord(state->srcSGrid, state->grid_size);
 
     state->imgPlane = (ImagePlane*)malloc(sizeof(ImagePlane));
-    InitImagePlane(state->imgPlane, img_fname);
+    InitImagePlane(state->imgPlane, img_fname, IMG_WIDTH_AS, IMG_HEIGHT_AS);
     state->gamma1 = 0;
     state->gamma2 = 0;
 
@@ -2078,6 +2079,69 @@ typedef struct {
     float gridLimDistance;
 } FormGUI; //TODO: I should probably put this inside State
 
+void UpdateLensAndSourceModelsFromGUI(State* state, FormGUI* formGUI) {
+    if (state->lensMan->count > 0) {
+        Lens* lens = &state->lensMan->lenses[0];
+        lens->modelType = formGUI->lensModelType;
+        SELECTED_LENS_MODEL = dropdownLensModel;
+        lens->M  = formGUI->lensMassInput * 1e12;
+        lens->b  = (double)formGUI->lensbInput;
+        lens->qh = (double)formGUI->lensqhInput;
+        lens->rc = (double)formGUI->lensrcInput;
+        lens->f  = formGUI->lensFInput;
+        lens->PA = formGUI->lensPAInput;
+        lens->cos_PA = cos(lens->PA);
+        lens->sin_PA = sin(lens->PA);
+        lens->coord.RA = formGUI->lensPositionSlider.RA;
+        lens->coord.DEC = formGUI->lensPositionSlider.DEC;
+    }
+    state->gamma1 = formGUI->gamma_1;
+    state->gamma2 = formGUI->gamma_2;
+
+    if (state->sourceMan->count > 0) {
+        Source* source = &state->sourceMan->sources[0];
+        source->modelType = formGUI->sourceModelType;
+        source->coord.RA = formGUI->sourcePositionSlider.RA;
+        source->coord.DEC = formGUI->sourcePositionSlider.DEC;
+        if (formGUI->sourceModelType == STYPE_EXT) {
+            source->radius = formGUI->sourceRadius;
+        }
+    }
+
+    state->obsImg[1-1].RA  = formGUI->obsImg1PositionSlider.RA;
+    state->obsImg[1-1].DEC = formGUI->obsImg1PositionSlider.DEC;
+    state->obsImg[2-1].RA  = formGUI->obsImg2PositionSlider.RA;
+    state->obsImg[2-1].DEC = formGUI->obsImg2PositionSlider.DEC;
+    state->obsImg[3-1].RA  = formGUI->obsImg3PositionSlider.RA;
+    state->obsImg[3-1].DEC = formGUI->obsImg3PositionSlider.DEC;
+    state->obsImg[4-1].RA  = formGUI->obsImg4PositionSlider.RA;
+    state->obsImg[4-1].DEC = formGUI->obsImg4PositionSlider.DEC;
+    state->obsImg[5-1].RA  = formGUI->obsImg5PositionSlider.RA;
+    state->obsImg[5-1].DEC = formGUI->obsImg5PositionSlider.DEC;
+    state->obsImg[6-1].RA  = formGUI->obsImg6PositionSlider.RA;
+    state->obsImg[6-1].DEC = formGUI->obsImg6PositionSlider.DEC;
+    state->obsImg[7-1].RA  = formGUI->obsImg7PositionSlider.RA;
+    state->obsImg[7-1].DEC = formGUI->obsImg7PositionSlider.DEC;
+    state->obsImg[8-1].RA  = formGUI->obsImg8PositionSlider.RA;
+    state->obsImg[8-1].DEC = formGUI->obsImg8PositionSlider.DEC;
+
+    state->obsImgIsVisible[1-1] = formGUI->obsImg1IsVisible;
+    state->obsImgIsVisible[2-1] = formGUI->obsImg2IsVisible;
+    state->obsImgIsVisible[3-1] = formGUI->obsImg3IsVisible;
+    state->obsImgIsVisible[4-1] = formGUI->obsImg4IsVisible;
+    state->obsImgIsVisible[5-1] = formGUI->obsImg5IsVisible;
+    state->obsImgIsVisible[6-1] = formGUI->obsImg6IsVisible;
+    state->obsImgIsVisible[7-1] = formGUI->obsImg7IsVisible;
+    state->obsImgIsVisible[8-1] = formGUI->obsImg8IsVisible;
+
+    DRAW_EXT_PARITY = formGUI->viewParity;
+    DRAW_EXT_AS_POINTS = formGUI->viewExtSrcPoints;
+
+    gridLimDistance = formGUI->gridLimDistance;
+    SCALE_SPLANE = formGUI->tmpSrcScale/10;
+    SCALE_IPLANE = formGUI->tmpImgScale/10;
+}
+
 void DrawSettingsForm(State *state, FormGUI *formGUI) {
     if (!formGUI->formActive) return;
     bool hasBeenUpdated = false;
@@ -2337,58 +2401,18 @@ void DrawSettingsForm(State *state, FormGUI *formGUI) {
             hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
             tmpCheckUpdate = GuiSlider(
                                 (Rectangle){formRect.x + 70, controlY, 80, 20},
-                                "","",&(imgPosTmp->RA), -2.0f, 2.0f);
+                                "","",&(imgPosTmp->RA), -IMG_WIDTH_AS/2.0f, IMG_WIDTH_AS/2.0f);
             hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
 
             tmpCheckUpdate = GuiSlider(
                                 (Rectangle){formRect.x + 160, controlY, 80, 20},
-                                "","",&(imgPosTmp->DEC), -2.0f, 2.0f);
+                                "","",&(imgPosTmp->DEC), -IMG_HEIGHT_AS/2.0f, IMG_HEIGHT_AS/2.0f);
             hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
             controlY += 24;
         }
         controlY += 20;
         GuiGroupBox((Rectangle){formRect.x, guiBoxSrcY, formRect.width + 20, controlY - guiBoxSrcY - 10}, "Observed images");
     }
-
-    // SCALING PARAMETERS --------------------------------------------------
-
-    guiBoxSrcY = controlY;
-    controlY += 10;
-    GuiLabel((Rectangle){formRect.x + 10, controlY, 280, 20}, "Src plane");
-    tmpCheckUpdate = GuiSlider(
-                                (Rectangle){formRect.x + 120, controlY, 90, 20},
-                                TextFormat("%.2f", 0.05f),
-                                TextFormat("%.2f", 0.35f),
-                                &(formGUI->tmpSrcScale), 0.05f, 0.35f);
-    hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
-    controlY += controlPadding;
-    GuiLabel((Rectangle){formRect.x + 10, controlY, 280, 20}, "Img plane");
-    tmpCheckUpdate = GuiSlider(
-                                (Rectangle){formRect.x + 120, controlY, 90, 20},
-                                TextFormat("%.2f", 0.05f),
-                                TextFormat("%.2f", 0.35f),
-                                &(formGUI->tmpImgScale), 0.05f, 0.35f);
-    hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
-    controlY += controlPadding;
-    GuiCheckBox((Rectangle){formRect.x + 10, controlY, 20, 20},
-                "Photometry",
-                &(formGUI->viewFITS));
-    GuiCheckBox((Rectangle){formRect.x + 100, controlY, 20, 20},
-                formGUI->viewScaleBar ? "Scale" : "Scale",
-                &(formGUI->viewScaleBar));
-    controlY += controlPadding;
-
-    if(CURRENT_MODE == SRC_TO_LENS_MODE) {
-        GuiLabel((Rectangle){formRect.x + 10, controlY, 280, 20}, "Max grid dist.");
-        tmpCheckUpdate = GuiSlider(
-                                    (Rectangle){formRect.x + 120, controlY, 90, 20},
-                                    TextFormat("%.2f", 0.0f),
-                                    TextFormat("%.2f", 10.0f),
-                                    &(formGUI->gridLimDistance), 0.0f, 10.0f);
-        hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
-        controlY += controlPadding;
-    }
-    GuiGroupBox((Rectangle){formRect.x, guiBoxSrcY, formRect.width + 20, controlY - guiBoxSrcY -10}, "Zoom and Grid view");
 
     // GuiDropdownBox closure --------------------------------------------------
     // NOTE: GuiDropdownBox must draw after any other control that can be covered on unfolding
@@ -2403,73 +2427,116 @@ void DrawSettingsForm(State *state, FormGUI *formGUI) {
     SELECTED_LENS_MODEL = dropdownLensModel;
     hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
 
-
     if (hasBeenUpdated) { //Check if anything changed
-        if (state->lensMan->count > 0) {
-            Lens* lens = &state->lensMan->lenses[0];
-            lens->modelType = formGUI->lensModelType;
-            SELECTED_LENS_MODEL = dropdownLensModel;
-            lens->M  = formGUI->lensMassInput * 1e12;
-            lens->b  = (double)formGUI->lensbInput;
-            lens->qh = (double)formGUI->lensqhInput;
-            lens->rc = (double)formGUI->lensrcInput;
-            lens->f  = formGUI->lensFInput;
-            lens->PA = formGUI->lensPAInput;
-            lens->cos_PA = cos(lens->PA);
-            lens->sin_PA = sin(lens->PA);
-            lens->coord.RA = formGUI->lensPositionSlider.RA;
-            lens->coord.DEC = formGUI->lensPositionSlider.DEC;
-        }
-        state->gamma1 = formGUI->gamma_1;
-        state->gamma2 = formGUI->gamma_2;
-
-        if (state->sourceMan->count > 0) {
-            Source* source = &state->sourceMan->sources[0];
-            source->modelType = formGUI->sourceModelType;
-            source->coord.RA = formGUI->sourcePositionSlider.RA;
-            source->coord.DEC = formGUI->sourcePositionSlider.DEC;
-            if (formGUI->sourceModelType == STYPE_EXT) {
-                source->radius = formGUI->sourceRadius;
-            }
-        }
-
-        state->obsImg[1-1].RA  = formGUI->obsImg1PositionSlider.RA;
-        state->obsImg[1-1].DEC = formGUI->obsImg1PositionSlider.DEC;
-        state->obsImg[2-1].RA  = formGUI->obsImg2PositionSlider.RA;
-        state->obsImg[2-1].DEC = formGUI->obsImg2PositionSlider.DEC;
-        state->obsImg[3-1].RA  = formGUI->obsImg3PositionSlider.RA;
-        state->obsImg[3-1].DEC = formGUI->obsImg3PositionSlider.DEC;
-        state->obsImg[4-1].RA  = formGUI->obsImg4PositionSlider.RA;
-        state->obsImg[4-1].DEC = formGUI->obsImg4PositionSlider.DEC;
-        state->obsImg[5-1].RA  = formGUI->obsImg5PositionSlider.RA;
-        state->obsImg[5-1].DEC = formGUI->obsImg5PositionSlider.DEC;
-        state->obsImg[6-1].RA  = formGUI->obsImg6PositionSlider.RA;
-        state->obsImg[6-1].DEC = formGUI->obsImg6PositionSlider.DEC;
-        state->obsImg[7-1].RA  = formGUI->obsImg7PositionSlider.RA;
-        state->obsImg[7-1].DEC = formGUI->obsImg7PositionSlider.DEC;
-        state->obsImg[8-1].RA  = formGUI->obsImg8PositionSlider.RA;
-        state->obsImg[8-1].DEC = formGUI->obsImg8PositionSlider.DEC;
-
-        state->obsImgIsVisible[1-1] = formGUI->obsImg1IsVisible;
-        state->obsImgIsVisible[2-1] = formGUI->obsImg2IsVisible;
-        state->obsImgIsVisible[3-1] = formGUI->obsImg3IsVisible;
-        state->obsImgIsVisible[4-1] = formGUI->obsImg4IsVisible;
-        state->obsImgIsVisible[5-1] = formGUI->obsImg5IsVisible;
-        state->obsImgIsVisible[6-1] = formGUI->obsImg6IsVisible;
-        state->obsImgIsVisible[7-1] = formGUI->obsImg7IsVisible;
-        state->obsImgIsVisible[8-1] = formGUI->obsImg8IsVisible;
-
-        DRAW_EXT_PARITY = formGUI->viewParity;
-        DRAW_EXT_AS_POINTS = formGUI->viewExtSrcPoints;
-
-        gridLimDistance = formGUI->gridLimDistance;
-        SCALE_SPLANE = formGUI->tmpSrcScale/10;
-        SCALE_IPLANE = formGUI->tmpImgScale/10;
-
-        UpdateLensAndSourceModels(state);
-
+        UpdateLensAndSourceModelsFromGUI(state, formGUI);
     }
 }
+
+typedef struct {
+    float val;
+    char *val_buffer;
+    char *text_val;
+    bool allow_edit;
+} ValueBoxFloatControl;
+
+ValueBoxFloatControl* CreateValueBoxFloatControl(float initialValue) {
+    ValueBoxFloatControl *vbf = (ValueBoxFloatControl *)malloc(sizeof(ValueBoxFloatControl));
+    vbf->val = initialValue;
+    vbf->val_buffer = (char *)calloc(128, sizeof(char));
+    vbf->text_val = (char *)calloc(128, sizeof(char));
+    snprintf(vbf->text_val, 128, "%2.1f", vbf->val);
+    vbf->allow_edit = false;
+    return vbf;
+}
+
+void ImageFITSZoomGUIMenu(State *state, FormGUI *formGUI, GuiWindowFileDialogState* fileDialogState, ValueBoxFloatControl* vbf) {
+    bool hasBeenUpdated = false;
+    bool tmpCheckUpdate;
+    bool editASValueBoxMode = false;
+
+    Rectangle formRect = {ctrExtraPanX + 330, ctrExtraPanY - 120, 260, 30};
+    float guiBoxSrcY = formRect.y;
+    int controlY = formRect.y + 20;
+    int controlPadding = 35;
+
+    // Load Fits window --------------------------------------------------
+    if (fileDialogState->windowActive) GuiLock();
+
+    if (GuiButton((Rectangle){ formRect.x + 60, controlY, 140, 30}, GuiIconText(ICON_FILE_OPEN, "Open .fits"))){
+        fileDialogState->windowActive = true;
+    }
+    GuiUnlock();
+    controlY += controlPadding;
+
+    // Set size of .fits in arcseconds -----------------------------------
+    char textValue[RAYGUI_VALUEBOX_MAX_CHARS + 1] = "\0";
+    float oldVal = vbf->val;
+    if (GuiValueBoxFloat(
+        (Rectangle){ formRect.x + 160, controlY, 40, 30},
+        "side in as:",
+        vbf->text_val,
+        &vbf->val,
+        vbf->allow_edit))
+    {
+        vbf->allow_edit = !vbf->allow_edit;
+    }
+    if (vbf->val < 0.1) { vbf->val = 0.1; }
+    else if (vbf->val > 10.0) { vbf->val = 10.0; }
+    snprintf(vbf->val_buffer, 128, "%2.1f", vbf->val);
+    if (oldVal != vbf->val) {
+        IMG_HEIGHT_AS = vbf->val;
+        IMG_WIDTH_AS = vbf->val;
+        UpdateImagePlane(state->imgPlane, img_fname, IMG_WIDTH_AS, IMG_HEIGHT_AS);
+    }
+    controlY += controlPadding;
+
+    // SCALING PARAMETERS --------------------------------------------------
+    controlY += 10;
+    int paddingX = 15;
+    GuiLabel((Rectangle){formRect.x + paddingX, controlY, 280, 20}, "Src plane");
+    tmpCheckUpdate = GuiSlider(
+                                (Rectangle){formRect.x + 120, controlY, 90, 20},
+                                TextFormat("%.2f", 0.05f),
+                                TextFormat("%.2f", 0.35f),
+                                &(formGUI->tmpSrcScale), 0.05f, 0.35f);
+    hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
+    controlY += controlPadding;
+    GuiLabel((Rectangle){formRect.x + paddingX, controlY, 280, 20}, "Img plane");
+    tmpCheckUpdate = GuiSlider(
+                                (Rectangle){formRect.x + 120, controlY, 90, 20},
+                                TextFormat("%.2f", 0.05f),
+                                TextFormat("%.2f", 0.35f),
+                                &(formGUI->tmpImgScale), 0.05f, 0.35f);
+    hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
+    controlY += controlPadding;
+    GuiCheckBox((Rectangle){formRect.x + paddingX, controlY, 20, 20},
+                "Photometry",
+                &(formGUI->viewFITS));
+    GuiCheckBox((Rectangle){formRect.x + 120, controlY, 20, 20},
+                formGUI->viewScaleBar ? "Scale" : "Scale",
+                &(formGUI->viewScaleBar));
+    controlY += controlPadding;
+
+    if(CURRENT_MODE == SRC_TO_LENS_MODE) {
+        GuiLabel((Rectangle){formRect.x + paddingX, controlY, 280, 20}, "Max grid dist.");
+        tmpCheckUpdate = GuiSlider(
+                                    (Rectangle){formRect.x + 120, controlY, 90, 20},
+                                    TextFormat("%.2f", 0.0f),
+                                    TextFormat("%.2f", 10.0f),
+                                    &(formGUI->gridLimDistance), 0.0f, 10.0f);
+        hasBeenUpdated = hasBeenUpdated || tmpCheckUpdate;
+        controlY += controlPadding;
+    }
+    GuiGroupBox((Rectangle){formRect.x, guiBoxSrcY, formRect.width, controlY - formRect.y + 10}, "Load .fits & zoom");
+
+    // GUI: Dialog Window
+    GuiWindowFileDialog(fileDialogState);
+
+    if (hasBeenUpdated) { //Check if anything changed
+        UpdateLensAndSourceModelsFromGUI(state, formGUI);
+    }
+}
+
 
 void UpdateFormGUI(State* state, FormGUI* formGUI){
     if (formGUI->formActive && state->lensMan->count > 0 && state->sourceMan->count > 0) {
@@ -2667,18 +2734,6 @@ void MenuImGUI(State* state, FormGUI* formGUI) {
     }
 }
 
-void ImGuiLoadFITS(GuiWindowFileDialogState* fileDialogState){
-    if (fileDialogState->windowActive) GuiLock();
-
-    if (GuiButton((Rectangle){ ctrExtraPanX+400, ctrExtraPanY-100, 140, 30 }, GuiIconText(ICON_FILE_OPEN, "Open .fits"))){
-        fileDialogState->windowActive = true;
-    }
-    GuiUnlock();
-
-    // GUI: Dialog Window
-    GuiWindowFileDialog(fileDialogState);
-}
-
 //------------------------------------------------------------------------------------
 // Program main entry point
 //------------------------------------------------------------------------------------
@@ -2696,6 +2751,9 @@ int main(void)
     GuiWindowFileDialogState fileDialogState = InitGuiWindowFileDialog(GetWorkingDirectory());
     bool exitWindow = false;
     strcpy(img_fname, default_img_fname);
+
+    // Init default ValueBoxFloatControl for .fits size
+    ValueBoxFloatControl* vbf = CreateValueBoxFloatControl((float)IMG_WIDTH_AS);
 
     // Init state
     CURRENT_MODE = LENS_TO_SRC_MODE;
@@ -2724,7 +2782,7 @@ int main(void)
             if (IsFileExtension(fileDialogState.fileNameText, ".fits"))
             {
                 strcpy(img_fname, TextFormat("%s" PATH_SEPERATOR "%s", fileDialogState.dirPathText, fileDialogState.fileNameText));
-                UpdateImagePlane(state->imgPlane, img_fname);
+                UpdateImagePlane(state->imgPlane, img_fname, IMG_WIDTH_AS, IMG_HEIGHT_AS);
             }
 
             fileDialogState.SelectFilePressed = false;
@@ -2791,7 +2849,7 @@ int main(void)
 
         //----------------------------------------------------------------------------------
         DisplayStateInfo(state);
-        ImGuiLoadFITS(&fileDialogState);
+        ImageFITSZoomGUIMenu(state, formGUI, &fileDialogState, vbf);
         EndDrawing();
     }
 
