@@ -1610,10 +1610,15 @@ Vector2 Deflection(Lens *lens, double  xin, double  yin){
     }
 }
 
-SkyCoord SingleSourcePosition(State *state, Lens *lens, SkyCoord imgPos){
+SkyCoord SingleSourcePosition(State *state, SkyCoord imgPos){
     double src_x = 0.0;
 	double src_y = 0.0;
-    Vector2 angle = Deflection(lens, imgPos.RA, imgPos.DEC);
+    Vector2 angle, ag;
+    for(int i=0;i<state->lensMan->count;i++){
+        ag = Deflection(&state->lensMan->lenses[i], imgPos.RA, imgPos.DEC);
+        angle.x += ag.x;
+        angle.y += ag.y;
+    }
     src_x = (1.0-state->gamma1)*imgPos.RA - state->gamma2*imgPos.DEC - (double)angle.x;
     src_y = (1.0+state->gamma1)*imgPos.DEC - state->gamma2*imgPos.RA - (double)angle.y;
     return (SkyCoord){(float)src_x, (float)src_y};
@@ -1845,7 +1850,7 @@ void DrawAllObsImages(State* state){
     for (int i = 0; i < 8; i++) {
         if(state->obsImgIsVisible[i]) {
             DrawPointImages(state->obsImg[i], i, 5.0, false);
-            s = SingleSourcePosition(state, &state->lensMan->lenses[0], state->obsImg[i]);
+            s = SingleSourcePosition(state, state->obsImg[i]);
             DrawPointImages(s, i, 5.0, true);
             // TraceLog(LOG_DEBUG, "SingleSourcePosition: imgPos (%.5f, %.5f) -> srcPos (%.5f, %.5f)", state->obsImg[i].RA, state->obsImg[i].DEC, s.RA, s.DEC);
         }
